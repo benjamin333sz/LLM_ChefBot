@@ -1,0 +1,6 @@
+python-dotenv
+langfuse
+google-cloud-aiplatform
+google.genai
+groq
+smolagents[litellm,toolkit]
