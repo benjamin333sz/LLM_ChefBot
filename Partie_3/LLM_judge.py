@@ -4,18 +4,16 @@ import json
 import re
 from datetime import datetime
 from typing import Any, Dict, List
+from llm_utils import chat, safe_json_loads, langfuse
 
-from dotenv import load_dotenv
-from groq import Groq
 from langfuse import Evaluation, get_client, observe
 
-load_dotenv()
-groq_client = Groq()
 
 # =============================================================================
 # 3.1 - CREATE DATASET
 # =============================================================================
 
+@observe(name="creation_database")
 def create_chefbot_dataset() -> None:
     """
     Create Langfuse dataset: chefbot-menu-eval
@@ -28,7 +26,7 @@ def create_chefbot_dataset() -> None:
     # Create dataset (if already exists, we just reuse it)
     try:
         client.create_dataset(
-            name="chefbot-menu-eval",
+            name="chefbot-menu-eval-GROUPE_SZUREK_KUSNIEREK_GOSSELIN",
             description="Evaluation dataset for ChefBot menu planning (constraints-based)",
             metadata={
                 "created_by": "chefbot_eval_script",
@@ -105,7 +103,7 @@ def create_chefbot_dataset() -> None:
 # THE TASK (your planner)
 # =============================================================================
 
-@observe()
+@observe(name="planner")
 def chefbot_planner(constraints: str) -> str:
     """
     The function under test: returns a menu / recipe text (string).
@@ -117,27 +115,27 @@ def chefbot_planner(constraints: str) -> str:
         "Évite de mentionner des ingrédients interdits."
     )
 
-    resp = groq_client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+    raw = chat(
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": constraints},
         ],
         temperature=0.4,
     )
-    return resp.choices[0].message.content.strip()
+    return raw
 
 
 # =============================================================================
 # 3.2 - PROGRAMMATIC EVALUATOR
 # =============================================================================
-
+@observe(name="normalisation",as_type="tool")
 def _normalize(text: str) -> str:
     # simple normalization for matching
     t = text.lower()
     t = re.sub(r"\s+", " ", t).strip()
     return t
-
+    
+@observe(name="evaluateur")
 def rule_evaluator(output: str, expected: dict) -> dict:
     """
     Checks automatically:
@@ -203,31 +201,20 @@ def llm_judge(question: str, output: str, expected: dict) -> dict:
         f"expected:\n{json.dumps(expected, ensure_ascii=False)}"
     )
 
-    resp = groq_client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+    raw = chat(
         messages=[
             {"role": "system", "content": JUDGE_PROMPT},
             {"role": "user", "content": user_message},
         ],
         temperature=0.1,
     )
-
-    content = resp.choices[0].message.content.strip()
-
-    # Best-effort strict JSON parse:
-    # If the model wraps JSON in fences, we extract the first {...}
-    if not content.startswith("{"):
-        m = re.search(r"\{.*\}", content, flags=re.S)
-        if m:
-            content = m.group(0)
-
-    return json.loads(content)
+    return safe_json_loads(raw)
 
 
 # =============================================================================
 # 3.4 - RUN EXPERIMENT (Langfuse)
 # =============================================================================
-
+@observe(name="experiment")
 def run_experiment() -> Any:
     client = get_client()
     dataset = client.get_dataset("chefbot-menu-eval")
@@ -287,18 +274,3 @@ def run_experiment() -> Any:
     print("  Datasets > chefbot-menu-eval > Runs (ou Experiments selon ton UI)")
     return results
 
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("CHEFBOT - DATASET + EVALUATION + EXPERIMENT")
-    print("=" * 60)
-
-    # 1) Create dataset (run once)
-    create_chefbot_dataset()
-
-    # 2) Run experiment
-    run_experiment()
-
-    # Flush traces/scores
-    get_client().flush()
-    print("✓ Flushed to Langfuse")

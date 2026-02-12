@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 from langfuse import observe, get_client, propagate_attributes
 
-from .llm_utils import chat, safe_json_loads, langfuse
+from llm_utils import chat, safe_json_loads, langfuse
 
 GROUP = "Groupe_SZUREK_KUSNIEREK_GOSSELIN"
 
