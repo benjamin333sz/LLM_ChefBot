@@ -57,6 +57,20 @@ if __name__ == "__main__":
             ask_chef(question=prompt, temperature=temperature),
             end="\n\n",
         )
-        # Pour température de 0.1, on a peu de créativité, alors que pour des températures plus élevé, nous avons plus de créativité (globalement)
+        # Pour une température de 0.1 :
+        # Le retour est très court et possède moins de détail. 
+
+        # Pour une température de 0.7 :
+        # Le retour est un peu plus long et un plus détaillé
+
+        # Pour une température de 1.2 :
+        # Le retour est bien plus long que les deux précédents essaies,
+        # avec beaucoup de précision et même l'avis du modèle.
+
+        # La température du modèle fait varier la "créativité" du modèle.
+        # Une température basse prendra des réponses très stricts (prend
+        # les probabilités les plus hautes et c'est tout).
+        # Une température élevé aura des réponses bien plus flexible (probabilité plus réparti)
+        
 
     langfuse.flush()

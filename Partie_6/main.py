@@ -15,6 +15,9 @@ load_dotenv()
 # CONFIG
 # =============================================================================
 
+import litellm
+litellm._turn_on_debug()
+
 if not os.getenv("GROQ_API_KEY"):
     raise RuntimeError("GROQ_API_KEY manquant. Mets-le dans .env puis relance.")
 
@@ -185,16 +188,12 @@ class MenuDatabaseTool(Tool):
 
     def __init__(self):
         super().__init__()
-        # Menu volontairement "safe": options vegan/sans gluten (pas de fruits à coque)
+        # Menu réduit safe: seulement vegan/sans gluten
         self.dishes = [
-            Dish("Bâtonnets de légumes & houmous", 5.5, 10, [], "entrée", ["vegan", "sans_gluten"]),
-            Dish("Salade quinoa agrumes", 8.5, 12, [], "entrée", ["vegan", "sans_gluten"]),
-            Dish("Curry pois chiches & épinards", 16.0, 20, [], "plat", ["vegan", "sans_gluten"]),
-            Dish("Riz aux légumes (poivrons, oignons, herbes)", 13.0, 18, [], "plat", ["vegan", "sans_gluten"]),
-            Dish("Salade de fruits frais", 6.5, 8, [], "dessert", ["vegan", "sans_gluten"]),
-            Dish("Sorbet citron", 6.0, 3, [], "dessert", ["vegan", "sans_gluten"]),
-            Dish("Thé vert", 3.0, 3, [], "boisson", ["vegan", "sans_gluten"]),
-            Dish("Eau pétillante", 2.5, 1, [], "boisson", ["vegan", "sans_gluten"]),
+            Dish("Houmous & légumes", 5.5, 10, [], "entrée", ["vegan", "sans_gluten"]),
+            Dish("Curry pois chiches", 16.0, 20, [], "plat", ["vegan", "sans_gluten"]),
+            Dish("Salade fruits", 6.5, 8, [], "dessert", ["vegan", "sans_gluten"]),
+            Dish("Eau petillante", 2.5, 1, [], "boisson", ["vegan", "sans_gluten"]),
         ]
 
     def forward(
@@ -245,50 +244,46 @@ def build_agents():
     nutritionist = CodeAgent(
         tools=[check_dietary_info],
         model=model,
-        max_steps=6,
+        max_steps=3,
         instructions=(
-            "Tu es nutritionist.\n"
-            "Objectif: vérifier allergènes et compatibilité (végétarien, sans gluten, sans fruits à coque/arachide).\n"
-            "Tu réponds par une checklist + verdict ok/non + corrections."
+            "Nutritionist.\n"
+            "Vérifie: pas gluten, pas fruits_a_coque, pas arachide.\n"
+            "OK ou fixes nécessaires?"
         ),
     )
 
     chef_agent = CodeAgent(
         tools=[check_fridge, get_recipe],
         model=model,
-        max_steps=8,
+        max_steps=3,
         instructions=(
-            "Tu es chef_agent.\n"
-            "Objectif: proposer 2 idées par service (apéro, entrée, plat, dessert).\n"
-            "Contraintes: tout le monde doit pouvoir manger chaque service.\n"
-            "Donc: sans gluten, sans fruits à coque/arachide, compatible végétariens (idéalement vegan).\n"
-            "Utilise check_fridge et get_recipe si utile.\n"
-            "Réponds en JSON strict."
+            "Chef.\n"
+            "2 idées/service: apéro, entrée, plat, dessert.\n"
+            "Tout le monde mange chaque service (vegan/sans gluten).\n"
+            "JSON: {aperitif:[...], entree:[...], plat:[...], dessert:[...]}."
         ),
     )
 
     budget_agent = CodeAgent(
         tools=[calculate, menu_tool],
         model=model,
-        max_steps=8,
+        max_steps=3,
         instructions=(
-            "Tu es budget_agent.\n"
-            "Objectif: construire un menu complet via menu_database pour 8 personnes.\n"
-            "Contraintes: sans gluten, sans fruits à coque/arachide, compatible végétariens.\n"
-            "Budget total max: 120€.\n"
-            "Calcule le total avec calculate.\n"
-            "Réponds en JSON strict avec détail + total + marge budget."
+            "Budget.\n"
+            "Menu 8 pers, 120€ max.\n"
+            "Exclure: gluten, fruits_a_coque, arachide.\n"
+            "Tag: vegan + sans_gluten si possible.\n"
+            "JSON: {menu:{...}, total_eur:...}."
         ),
     )
 
     manager = CodeAgent(
         tools=[],
         model=model,
-        max_steps=6,
+        max_steps=2,
         instructions=(
-            "Tu es manager (aucun outil).\n"
-            "Tu reçois les sorties des 3 agents et tu proposes une réponse finale claire client.\n"
-            "Format: menu final par service + justification contraintes + budget."
+            "Manager synthétise final.\n"
+            "Menu + vérif contraintes + budget."
         ),
     )
 

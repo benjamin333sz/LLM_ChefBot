@@ -6,16 +6,14 @@ from typing import List, Optional
 from datetime import datetime
 
 from dotenv import load_dotenv
-from smolagents import Tool, tool, ToolCallingAgent
-
-from llm_utils import get_groq_litellm_model
+from smolagents import Tool, CodeAgent, LiteLLMModel, tool
 
 load_dotenv()
 
 # -----------------------------------------------------------------------------
-# MODEL (Groq stable via api_base + api_key)
+# MODEL (adapte si besoin)
 # -----------------------------------------------------------------------------
-model = get_groq_litellm_model(model_id="groq/llama-3.3-70b-versatile", temperature=0.2)
+model = LiteLLMModel(model_id="groq/llama-3.3-70b-versatile")
 
 # -----------------------------------------------------------------------------
 # SIMPLE TXT TRACING
@@ -48,20 +46,45 @@ class MenuDatabaseTool(Tool):
         "Returns matching dishes as JSON."
     )
 
+    # Optional parameters => nullable=True
     inputs = {
-        "category": {"type": "string", "description": "entrée/plat/dessert/boisson or 'all'.", "nullable": True},
-        "max_price": {"type": "number", "description": "Maximum price per dish.", "nullable": True},
-        "exclude_allergens": {"type": "array", "items": {"type": "string"}, "description": "Allergens to exclude.", "nullable": True},
-        "include_tags": {"type": "array", "items": {"type": "string"}, "description": "Required tags.", "nullable": True},
-        "limit": {"type": "number", "description": "Max number of results.", "nullable": True},
+        "category": {
+            "type": "string",
+            "description": "Optional. One of: entrée, plat, dessert, boisson. Use 'all' to mean no filter.",
+            "nullable": True,
+        },
+        "max_price": {
+            "type": "number",
+            "description": "Optional. Maximum price per dish.",
+            "nullable": True,
+        },
+        "exclude_allergens": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional. Allergens to exclude (e.g. gluten, lait, œuf, soja).",
+            "nullable": True,
+        },
+        "include_tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional. Tags required. Use: vegetarien, vegan, sans_gluten.",
+            "nullable": True,
+        },
+        "limit": {
+            "type": "number",
+            "description": "Optional. Max number of results.",
+            "nullable": True,
+        },
     }
 
     output_type = "string"
 
+    # Canonical sets (helps robust filtering)
     _VALID_CATEGORIES = {"entrée", "plat", "dessert", "boisson"}
     _VALID_TAGS = {"vegetarien", "vegan", "sans_gluten"}
     _VALID_ALLERGENS = {"gluten", "lait", "œuf", "soja", "arachide"}
 
+    # Synonyms (LLM often outputs english)
     _TAG_SYNONYMS = {
         "vegetarian": "vegetarien",
         "vegetarien": "vegetarien",
@@ -75,28 +98,30 @@ class MenuDatabaseTool(Tool):
     }
 
     _ALLERGEN_SYNONYMS = {
-        "egg": "œuf", "oeuf": "œuf", "œuf": "œuf",
-        "milk": "lait", "dairy": "lait", "lait": "lait",
-        "soy": "soja", "soya": "soja", "soja": "soja",
-        "peanut": "arachide", "arachide": "arachide",
-        "gluten": "gluten", "wheat": "gluten", "blé": "gluten",
+        "egg": "œuf",
+        "oeuf": "œuf",
+        "œuf": "œuf",
+        "milk": "lait",
+        "dairy": "lait",
+        "lait": "lait",
+        "soy": "soja",
+        "soya": "soja",
+        "soja": "soja",
+        "peanut": "arachide",
+        "arachide": "arachide",
+        "gluten": "gluten",
+        "wheat": "gluten",
+        "blé": "gluten",
     }
 
     def __init__(self):
         super().__init__()
         self.dishes = [
-            Dish("Bruschetta", 7.5, 10, ["gluten"], "entrée", ["vegetarien"]),
             Dish("Salade quinoa", 8.5, 12, [], "entrée", ["vegan", "sans_gluten"]),
-            Dish("Velouté potimarron", 7.0, 15, ["lait"], "entrée", ["vegetarien"]),
-            Dish("Risotto champignons", 18.0, 25, ["lait"], "plat", ["vegetarien"]),
             Dish("Curry pois chiches", 16.0, 20, [], "plat", ["vegan", "sans_gluten"]),
-            Dish("Poulet rôti", 19.5, 30, [], "plat", ["sans_gluten"]),
-            Dish("Pâtes primavera", 15.0, 18, ["gluten"], "plat", ["vegetarien"]),
+            Dish("Risotto champignons", 18.0, 25, ["lait"], "plat", ["vegetarien"]),
             Dish("Saumon grillé", 21.0, 22, [], "plat", ["sans_gluten"]),
-            Dish("Tacos vegans", 14.5, 15, ["soja"], "plat", ["vegan", "sans_gluten"]),
-            Dish("Mousse chocolat", 7.0, 10, ["œuf", "lait"], "dessert", ["vegetarien"]),
             Dish("Salade fruits", 6.5, 8, [], "dessert", ["vegan", "sans_gluten"]),
-            Dish("Café / Espresso", 2.5, 2, [], "boisson", ["vegan", "sans_gluten"]),
             Dish("Thé vert", 3.0, 3, [], "boisson", ["vegan", "sans_gluten"]),
         ]
         trace(f"[MenuDatabaseTool] init dishes={len(self.dishes)}")
@@ -107,8 +132,12 @@ class MenuDatabaseTool(Tool):
         c = category.strip().lower()
         if c in ("all", "*", "toutes", "tout"):
             return None
+        # accept accents or not
         c = c.replace("entree", "entrée")
-        return c if c in self._VALID_CATEGORIES else None
+        if c in self._VALID_CATEGORIES:
+            return c
+        # If unknown, ignore category filter (prevents empty results)
+        return None
 
     def _norm_tags(self, tags: Optional[List[str]]) -> List[str]:
         if not tags:
@@ -116,7 +145,8 @@ class MenuDatabaseTool(Tool):
         out = []
         for t in tags:
             key = t.strip().lower()
-            mapped = self._TAG_SYNONYMS.get(key, key).replace(" ", "_")
+            mapped = self._TAG_SYNONYMS.get(key, key)
+            mapped = mapped.replace(" ", "_")
             if mapped in self._VALID_TAGS:
                 out.append(mapped)
         return out
@@ -148,12 +178,20 @@ class MenuDatabaseTool(Tool):
         for d in self.dishes:
             if cat and d.category.lower() != cat:
                 continue
+
             if max_price is not None and d.price > float(max_price):
                 continue
-            if exc_all and any(a in [x.lower() for x in d.allergens] for a in exc_all):
-                continue
-            if inc_tags and any(t not in [x.lower() for x in d.tags] for t in inc_tags):
-                continue
+
+            if exc_all:
+                dish_all = [x.lower() for x in d.allergens]
+                if any(a in dish_all for a in exc_all):
+                    continue
+
+            if inc_tags:
+                dish_tags = [x.lower() for x in d.tags]
+                if any(t not in dish_tags for t in inc_tags):
+                    continue
+
             results.append(d)
 
         results.sort(key=lambda x: x.price)
@@ -161,11 +199,23 @@ class MenuDatabaseTool(Tool):
             results = results[: int(limit)]
 
         payload = [
-            {"name": d.name, "price": d.price, "prep_minutes": d.prep_minutes, "allergens": d.allergens, "category": d.category, "tags": d.tags}
+            {
+                "name": d.name,
+                "price": d.price,
+                "prep_minutes": d.prep_minutes,
+                "allergens": d.allergens,
+                "category": d.category,
+                "tags": d.tags,
+            }
             for d in results
         ]
 
-        trace(f"[menu_database] cat={category}->{cat} max_price={max_price} exc={exclude_allergens}->{exc_all} inc={include_tags}->{inc_tags} results={len(payload)}")
+        trace(
+            f"[menu_database] category={category}->{cat} max_price={max_price} "
+            f"exclude_allergens={exclude_allergens}->{exc_all} include_tags={include_tags}->{inc_tags} "
+            f"results={len(payload)}"
+        )
+
         return json.dumps({"results": payload}, ensure_ascii=False)
 
 
@@ -179,10 +229,7 @@ def calculate(expression: str) -> str:
     Evaluate a math expression.
 
     Args:
-        expression: Math expression to evaluate (example: "18 + 16 + 7").
-
-    Returns:
-        The result as a string (or "Invalid expression" if the expression is not allowed).
+        expression: Math expression like '18 + 16 + 7'
     """
     allowed = set("0123456789+-*/.() ")
     if not all(c in allowed for c in expression):
@@ -193,28 +240,26 @@ def calculate(expression: str) -> str:
         return "Invalid expression"
 
 
-
 # =============================================================================
 # 5.2 - AGENT WITH PLANNING
 # =============================================================================
 
-def build_agent() -> ToolCallingAgent:
+def build_agent() -> CodeAgent:
+    # NOTE: tool instance created here to be shared in conversation as well
     menu_tool = MenuDatabaseTool()
 
-    return ToolCallingAgent(
+    return CodeAgent(
         tools=[menu_tool, calculate],
         model=model,
         planning_interval=2,
-        max_steps=10,
+        max_steps=5,
         instructions=(
-            "Tu es un serveur de restaurant.\n"
-            "Tu dois proposer un MENU COMPLET pour 3 personnes (entrée + plat + dessert, boisson optionnelle).\n"
-            "Contraintes: 1 végétarien, 1 sans gluten, 1 sans contrainte. Budget groupe max 60€.\n"
-            "Règles:\n"
-            "- Utilise menu_database pour trouver des plats.\n"
-            "- Pour sans gluten: exclure l'allergène 'gluten' (ou tag sans_gluten).\n"
-            "- Calcule l'addition avec calculate, et donne une addition détaillée.\n"
-            "- Si tu choisis des plats différents par personne, précise qui mange quoi.\n"
+            "Tu es serveur.\n"
+            "Propose menu 3 pers: entrée + plat + dessert.\n"
+            "- Végétarien (tag 'vegetarien')\n"
+            "- Sans gluten (exclude 'gluten')\n"
+            "- Sans contrainte\n"
+            "Budget 60€. Utilise menu_database et calculate.\n"
         ),
     )
 
@@ -232,6 +277,7 @@ def test_planning_agent() -> None:
 
     result = agent.run(question)
     trace("AGENT: " + str(result))
+
     print(result)
 
 
@@ -244,24 +290,31 @@ def test_conversation() -> None:
 
     trace("\n--- 5.3 TEST (conversation, 3 turns) ---")
 
+    # Turn 1
     q1 = "Bonsoir ! On est 3 (1 végétarien, 1 sans gluten, 1 sans contrainte). Tu nous suggères quoi ?"
     trace("USER(1): " + q1)
     r1 = agent.run(q1)
     trace("AGENT(1): " + str(r1))
     print("\nTour 1:\n", r1)
 
+    # Turn 2
     q2 = "Finalement le végétarien ne veut pas de risotto. Tu remplaces son plat par autre chose."
     trace("USER(2): " + q2)
     r2 = agent.run(q2, reset=False)
     trace("AGENT(2): " + str(r2))
     print("\nTour 2:\n", r2)
 
+    # Turn 3
     q3 = "Ok, maintenant fais l'addition détaillée finale pour les 3."
     trace("USER(3): " + q3)
     r3 = agent.run(q3, reset=False)
     trace("AGENT(3): " + str(r3))
     print("\nTour 3:\n", r3)
 
+
+# =============================================================================
+# RUN
+# =============================================================================
 
 if __name__ == "__main__":
     print("\n=== PARTIE 5 ===\n")
