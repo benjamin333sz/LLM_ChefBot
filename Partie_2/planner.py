@@ -8,7 +8,7 @@ from .llm_utils import chat, safe_json_loads, langfuse
 GROUP = "Groupe_SZUREK_KUSNIEREK_GOSSELIN"
 
 
-@observe(name=f"{GROUP}_Partie_2")
+@observe(name=f"{GROUP}_Partie_2",as_type="chain")
 def plan_weekly_menu(constraints: str) -> Dict[str, Any]:
     # Trace + tags groupe
     with propagate_attributes(tags=["Partie_2", GROUP]):
