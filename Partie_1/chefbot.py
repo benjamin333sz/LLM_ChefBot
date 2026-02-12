@@ -45,16 +45,18 @@ def ask_chef(question:str,temperature:float)->str:
             )
     return response.choices[0].message.content
 
-prompt="""
-Que proposez-vous comme repas pour ce midi ?
-"""
-temperatures=[0.1,0.7,1.2]
-for temperature in temperatures:
-    print(f"Temperature at {temperature}\n\n",
-          "_"*50,
-          ask_chef(question=prompt,temperature=temperature),
-          end="\n\n")
-    # Pour température de 0.1, on a peu de créativité, alors que pour des températures plus élevé, nous avons plus de créativité (globalement)
+if __name__ == "__main__":
+    prompt = """
+    Que proposez-vous comme repas pour ce midi ?
+    """
+    temperatures = [0.1, 0.7, 1.2]
+    for temperature in temperatures:
+        print(
+            f"Temperature at {temperature}\n\n",
+            "_" * 50,
+            ask_chef(question=prompt, temperature=temperature),
+            end="\n\n",
+        )
+        # Pour température de 0.1, on a peu de créativité, alors que pour des températures plus élevé, nous avons plus de créativité (globalement)
 
-
-langfuse.flush()
+    langfuse.flush()
